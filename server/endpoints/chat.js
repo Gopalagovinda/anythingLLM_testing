@@ -2,7 +2,10 @@ const { v4: uuidv4 } = require("uuid");
 const { reqBody, userFromSession, multiUserMode } = require("../utils/http");
 const { validatedRequest } = require("../utils/middleware/validatedRequest");
 const { Telemetry } = require("../models/telemetry");
-const { streamChatWithWorkspace } = require("../utils/chats/stream");
+const {
+  streamChatWithWorkspace,
+  retrieveFromWorkspace,
+} = require("../utils/chats/stream");
 const {
   ROLES,
   flexUserRoleValid,
@@ -205,6 +208,38 @@ function chatEndpoints(app) {
           error: e.message,
         });
         response.end();
+      }
+    }
+  );
+  app.post(
+    "/workspace/:slug/retrieve",
+    [validatedRequest, flexUserRoleValid([ROLES.all]), validWorkspaceSlug],
+    async (request, response) => {
+      try {
+        const user = await userFromSession(request, response);
+        const { query, topN, similarityThreshold } = reqBody(request);
+        const workspace = response.locals.workspace;
+
+        if (typeof query !== "string" || query.trim().length === 0) {
+          response.status(400).json({ error: "query is required." });
+          return;
+        }
+
+        const result = await retrieveFromWorkspace(workspace, query.trim(), {
+          topN,
+          similarityThreshold,
+        });
+
+        await EventLogs.logEvent("workspace_retrieve", {
+          workspaceName: workspace?.name,
+          query,
+          userId: user?.id || null,
+        });
+
+        response.status(200).json(result);
+      } catch (e) {
+        console.error(e.message, e);
+        response.status(500).json({ error: e.message });
       }
     }
   );

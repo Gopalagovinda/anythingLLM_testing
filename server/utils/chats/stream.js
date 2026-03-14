@@ -310,7 +310,91 @@ async function streamChatWithWorkspace(
   return;
 }
 
+/**
+ * Performs only the RAG retrieval step (vector similarity search) without calling the LLM.
+ * Useful when you just need to find relevant documents for a query.
+ * @param {object} workspace
+ * @param {string} query
+ * @param {object} [options]
+ * @param {number} [options.topN] - Override workspace topN
+ * @param {number} [options.similarityThreshold] - Override workspace similarityThreshold
+ * @returns {Promise<{sources: object[], query: string, workspace: string, message: string|null}>}
+ */
+async function retrieveFromWorkspace(workspace, query, options = {}) {
+  const VectorDb = getVectorDbClass();
+  const LLMConnector = getLLMProvider({
+    provider: workspace?.chatProvider,
+    model: workspace?.chatModel,
+  });
+
+  const hasVectorizedSpace = await VectorDb.hasNamespace(workspace.slug);
+  const embeddingsCount = await VectorDb.namespaceCount(workspace.slug);
+
+  if (!hasVectorizedSpace || embeddingsCount === 0) {
+    return {
+      sources: [],
+      query,
+      workspace: workspace.slug,
+      message: "No documents are embedded in this workspace.",
+    };
+  }
+
+  const topN = options.topN ?? workspace?.topN ?? 4;
+  const similarityThreshold =
+    options.similarityThreshold ?? workspace?.similarityThreshold ?? 0.25;
+
+  const { DocumentManager } = require("../DocumentManager");
+  let pinnedDocIdentifiers = [];
+  let pinnedSources = [];
+
+  await new DocumentManager({
+    workspace,
+    maxTokens: LLMConnector.promptWindowLimit(),
+  })
+    .pinnedDocs()
+    .then((pinnedDocs) => {
+      pinnedDocs.forEach((doc) => {
+        const { pageContent, ...metadata } = doc;
+        pinnedDocIdentifiers.push(sourceIdentifier(doc));
+        pinnedSources.push({
+          text:
+            pageContent.slice(0, 1_000) +
+            "...continued on in source document...",
+          ...metadata,
+          pinned: true,
+        });
+      });
+    });
+
+  const vectorSearchResults = await VectorDb.performSimilaritySearch({
+    namespace: workspace.slug,
+    input: query,
+    LLMConnector,
+    similarityThreshold,
+    topN,
+    filterIdentifiers: pinnedDocIdentifiers,
+    rerank: workspace?.vectorSearchMode === "rerank",
+  });
+
+  if (vectorSearchResults.message) {
+    return {
+      sources: [],
+      query,
+      workspace: workspace.slug,
+      message: vectorSearchResults.message,
+    };
+  }
+
+  return {
+    sources: [...pinnedSources, ...vectorSearchResults.sources],
+    query,
+    workspace: workspace.slug,
+    message: null,
+  };
+}
+
 module.exports = {
   VALID_CHAT_MODE,
   streamChatWithWorkspace,
+  retrieveFromWorkspace,
 };

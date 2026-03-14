@@ -7,7 +7,10 @@ const { WorkspaceChats } = require("../../../models/workspaceChats");
 const { getVectorDbClass, getLLMProvider } = require("../../../utils/helpers");
 const { multiUserMode, reqBody } = require("../../../utils/http");
 const { validApiKey } = require("../../../utils/middleware/validApiKey");
-const { VALID_CHAT_MODE } = require("../../../utils/chats/stream");
+const {
+  VALID_CHAT_MODE,
+  retrieveFromWorkspace,
+} = require("../../../utils/chats/stream");
 const { EventLogs } = require("../../../models/eventLogs");
 const {
   convertToChatHistory,
@@ -1004,6 +1007,83 @@ function apiWorkspaceEndpoints(app) {
       } catch (e) {
         console.error(e.message, e);
         response.sendStatus(500).end();
+      }
+    }
+  );
+  app.post(
+    "/v1/workspace/:slug/retrieve",
+    [validApiKey],
+    async (request, response) => {
+      /*
+   #swagger.tags = ['Workspaces']
+   #swagger.description = 'Perform a RAG-only similarity search against a workspace without calling the LLM. Returns the top matching document chunks for a given query.'
+   #swagger.requestBody = {
+       description: 'Query to search for in the workspace embeddings.',
+       required: true,
+       content: {
+         "application/json": {
+           example: {
+             query: "What is the refund policy?",
+             topN: 4,
+             similarityThreshold: 0.25
+           }
+         }
+       }
+     }
+   #swagger.responses[200] = {
+     content: {
+       "application/json": {
+         schema: {
+           type: 'object',
+           example: {
+             sources: [
+               {
+                 title: "document.pdf",
+                 text: "chunk text...",
+                 score: 0.87,
+                 docpath: "custom-documents/document.pdf",
+                 published: "2024-01-01"
+               }
+             ],
+             query: "What is the refund policy?",
+             workspace: "my-workspace",
+             message: null
+           }
+         }
+       }
+     }
+   }
+   #swagger.responses[403] = {
+     schema: {
+       "$ref": "#/definitions/InvalidAPIKey"
+     }
+   }
+  */
+      try {
+        const { slug } = request.params;
+        const { query, topN, similarityThreshold } = reqBody(request);
+        const workspace = await Workspace.get({ slug: String(slug) });
+
+        if (!workspace) {
+          response
+            .status(400)
+            .json({ error: `Workspace ${slug} is not a valid workspace.` });
+          return;
+        }
+
+        if (typeof query !== "string" || query.trim().length === 0) {
+          response.status(400).json({ error: "query is required." });
+          return;
+        }
+
+        const result = await retrieveFromWorkspace(workspace, query.trim(), {
+          topN,
+          similarityThreshold,
+        });
+        response.status(200).json(result);
+      } catch (e) {
+        console.error(e.message, e);
+        response.status(500).json({ error: e.message });
       }
     }
   );
