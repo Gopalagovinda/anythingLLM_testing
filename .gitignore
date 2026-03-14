@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+.yarn/
+
+# Models & large binary data
+ollama-models/
+hf-models/
+notebooks/
+
+# Vector DB data
+server/storage/lancedb/
+
+# Temp & cache
+server/storage/tmp/
+server/storage/models/
+collector/storage/
+collector/hotdir/
+
+# Logs & env
+*.log
+ports.log
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
