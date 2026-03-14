@@ -2,7 +2,11 @@ const { v4: uuidv4 } = require("uuid");
 const { DocumentManager } = require("../DocumentManager");
 const { WorkspaceChats } = require("../../models/workspaceChats");
 const { WorkspaceParsedFiles } = require("../../models/workspaceParsedFiles");
-const { getVectorDbClass, getLLMProvider } = require("../helpers");
+const {
+  getVectorDbClass,
+  getLLMProvider,
+  getEmbeddingEngineSelection,
+} = require("../helpers");
 const { writeResponseChunk } = require("../helpers/chat/responses");
 const { grepAgents } = require("./agents");
 const {
@@ -322,10 +326,9 @@ async function streamChatWithWorkspace(
  */
 async function retrieveFromWorkspace(workspace, query, options = {}) {
   const VectorDb = getVectorDbClass();
-  const LLMConnector = getLLMProvider({
-    provider: workspace?.chatProvider,
-    model: workspace?.chatModel,
-  });
+  // Use the embedding engine directly — the chat LLM is not needed for retrieval.
+  // This avoids loading the (potentially large/GPU-heavy) chat model entirely.
+  const EmbedderEngine = getEmbeddingEngineSelection();
 
   const hasVectorizedSpace = await VectorDb.hasNamespace(workspace.slug);
   const embeddingsCount = await VectorDb.namespaceCount(workspace.slug);
@@ -349,7 +352,7 @@ async function retrieveFromWorkspace(workspace, query, options = {}) {
 
   await new DocumentManager({
     workspace,
-    maxTokens: LLMConnector.promptWindowLimit(),
+    maxTokens: EmbedderEngine.embeddingMaxChunkLength ?? 8192,
   })
     .pinnedDocs()
     .then((pinnedDocs) => {
@@ -369,7 +372,7 @@ async function retrieveFromWorkspace(workspace, query, options = {}) {
   const vectorSearchResults = await VectorDb.performSimilaritySearch({
     namespace: workspace.slug,
     input: query,
-    LLMConnector,
+    LLMConnector: EmbedderEngine,
     similarityThreshold,
     topN,
     filterIdentifiers: pinnedDocIdentifiers,
